@@ -1,0 +1,47 @@
+[package]
+name = "proxid"
+version = "0.1.0"
+edition = "2024"
+resolver = "2"
+description = "OpenAI proxy service"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/username/my_project"
+
+[dependencies]
+accessory = "2.1.0"
+anyhow = "1.0.102"
+axum = { version = "0.8", features = ["macros", "json", "multipart"] }
+base64 = "0.22.1"
+bytes = "1.11.1"
+figment = { version = "0.10", features = ["toml", "env"] }
+reqwest = { version = "0.13.3", features = ["json"] }
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.149"
+strum = { version = "0.28", features = ["derive"] }
+tempfile = "3.27.0"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = { version = "0.1", features = ["attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = { version = "2", features = ["serde"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+mockito = "1"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+strip = true
+lto = true
+panic = "abort"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
