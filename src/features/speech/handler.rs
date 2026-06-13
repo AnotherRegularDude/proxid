@@ -24,7 +24,7 @@ pub async fn speech<T: Transcoder>(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, format.mime())
         .body(Body::from(bytes))
-        .map_err(|e| crate::core::error::AppError::Internal(e.to_string()))?;
+        .map_err(|e| crate::core::error::AppError::Internal(format!("{e:#}")))?;
 
     Ok(resp)
 }

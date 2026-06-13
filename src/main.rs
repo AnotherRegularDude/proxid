@@ -9,10 +9,10 @@ async fn main() -> Result<()> {
     let settings = config::ConfigBuilder::new()
         .with_custom_config(std::env::var("PROXID_CONFIG").ok().map(MergedData::File))
         .load()?;
-    proxid::init(&settings.logging)?;
+    proxid::init(settings.logging())?;
 
     let state = app::build_state(settings)?;
-    let addr = format!("{}:{}", state.settings().server.host, state.settings().server.port);
+    let addr = format!("{}:{}", state.settings().server().host(), state.settings().server().port());
 
     tracing::info!("app state successfully initialized");
 

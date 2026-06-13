@@ -18,43 +18,41 @@ impl<T: Transcoder> SpeechService<T> {
         Self {
             provider: state.provider().clone(),
             transcoder: state.transcoder().clone(),
-            audio_cfg: state.settings().audio.clone(),
+            audio_cfg: state.settings().audio().clone(),
         }
     }
 
-    #[tracing::instrument(skip_all, fields(model = %req.model, voice = %req.voice, format = %req.response_format.as_ref()))]
+    #[tracing::instrument(skip_all, fields(model = %req.model(), voice = %req.voice(), format = %req.response_format().as_ref()))]
     pub async fn run(&self, req: SpeechRequest) -> AppResult<(AudioFormat, bytes::Bytes)> {
         let synth = self
             .provider
-            .synthesise(SpeechSynthRequest {
-                model: req.model,
-                input: req.input,
-                voice: req.voice,
-                speed: req.speed,
-            })
+            .synthesise(SpeechSynthRequest::new(
+                req.model().clone(),
+                req.input().clone(),
+                req.voice().clone(),
+                *req.speed(),
+            ))
             .await
             .map_err(|e| AppError::Internal(format!("{e:#}")))?;
 
         // OpenRouter always returns PCM 24kHz/16-bit/mono; skip re-encoding when
         // the client requests PCM and the configured sample rate matches.
-        if matches!(req.response_format, AudioFormat::Pcm)
-            && self.audio_cfg.pcm_sample_rate == 24_000
+        if matches!(*req.response_format(), AudioFormat::Pcm)
+            && self.audio_cfg.pcm_sample_rate() == 24_000
         {
-            return Ok((AudioFormat::Pcm, synth.bytes));
+            return Ok((AudioFormat::Pcm, synth.bytes().clone()));
         }
 
-        // SAFETY: into_request() already validated that response_format is
-        // supported for speech, so for_speech() is guaranteed to return Some.
-        let target = OutputFormat::for_speech(req.response_format)
-            .expect("validated response_format should map to OutputFormat");
+        let target = OutputFormat::for_speech(*req.response_format())
+            .ok_or_else(|| AppError::Internal("unsupported format for speech".to_string()))?;
 
-        let src = SourceAudio { bytes: synth.bytes, format: AudioFormat::Pcm };
+        let src = SourceAudio::new(synth.bytes().clone(), AudioFormat::Pcm);
         let bytes = self
             .transcoder
             .convert(src, target)
             .await
             .map_err(|e| AppError::Internal(format!("{e:#}")))?;
 
-        Ok((req.response_format, bytes))
+        Ok((*req.response_format(), bytes))
     }
 }

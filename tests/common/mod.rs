@@ -76,3 +76,40 @@ pub fn load_fixture(name: &str) -> bytes::Bytes {
         .unwrap_or_else(|e| panic!("failed to read fixture '{}': {e}", path.display()))
         .into()
 }
+
+/// Build a multipart/form-data body for transcription tests.
+///
+/// `file_part` is `Option<(field_name, filename, content_type, data)>`.
+/// `text_parts` is `&[(field_name, value)]` for optional text fields like "model" and "temperature".
+#[allow(dead_code, reason = "test utility used across transcription integration tests")]
+pub fn make_multipart_body(
+    boundary: &str,
+    file_part: Option<(&str, &str, &str, &[u8])>,
+    text_parts: &[(&str, &str)],
+) -> Vec<u8> {
+    let mut body = Vec::new();
+
+    if let Some((field_name, filename, content_type, data)) = file_part {
+        let header = format!(
+            "--{boundary}\r\n\
+             Content-Disposition: form-data; name=\"{field_name}\"; filename=\"{filename}\"\r\n\
+             Content-Type: {content_type}\r\n\r\n"
+        );
+        body.extend_from_slice(header.as_bytes());
+        body.extend_from_slice(data);
+    }
+
+    for (name, value) in text_parts {
+        let part = format!(
+            "\r\n--{boundary}\r\n\
+             Content-Disposition: form-data; name=\"{name}\"\r\n\r\n\
+             {value}"
+        );
+        body.extend_from_slice(part.as_bytes());
+    }
+
+    let closing = format!("\r\n--{boundary}--\r\n");
+    body.extend_from_slice(closing.as_bytes());
+
+    body
+}

@@ -3,6 +3,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
+pub type AppResult<T> = Result<T, AppError>;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("invalid request: {0}")]
@@ -17,8 +19,6 @@ pub enum AppError {
     #[error("internal error: {0}")]
     Internal(String),
 }
-
-pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(Serialize)]
 struct ErrorBody {
@@ -39,20 +39,26 @@ impl AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
-        Self::Internal(e.to_string())
+        Self::Internal(format!("{e:#}"))
     }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, kind) = match &self {
-            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "invalid_request_error"),
-            AppError::UnsupportedFormat(_) => (StatusCode::BAD_REQUEST, "invalid_request_error"),
-            AppError::MissingField(_) => (StatusCode::BAD_REQUEST, "invalid_request_error"),
-            AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+        let (status, kind, is_internal) = match &self {
+            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "invalid_request_error", false),
+            AppError::UnsupportedFormat(_) => {
+                (StatusCode::BAD_REQUEST, "invalid_request_error", false)
+            }
+            AppError::MissingField(_) => (StatusCode::BAD_REQUEST, "invalid_request_error", false),
+            AppError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", true),
         };
 
-        tracing::error!(error = %self, status = %status.as_u16(), kind, "request failed");
+        if is_internal {
+            tracing::error!(error = %self, status = %status.as_u16(), kind, "request failed");
+        } else {
+            tracing::warn!(error = %self, status = %status.as_u16(), kind, "request failed");
+        }
 
         let body = ErrorBody { error: ErrorPayload { message: self.to_string(), r#type: kind } };
 
@@ -64,43 +70,45 @@ impl IntoResponse for AppError {
 mod tests {
     use super::*;
     use http_body_util::BodyExt;
+    use tokio::test;
 
-    fn extract_status_and_type(error: AppError) -> (StatusCode, String) {
+    async fn extract_status_and_type(error: AppError) -> (StatusCode, String) {
         let resp = error.into_response();
         let status = resp.status();
         let body = resp.into_body();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let bytes = rt.block_on(async { BodyExt::collect(body).await.unwrap().to_bytes() });
+        let bytes = BodyExt::collect(body).await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let error_type = json["error"]["type"].as_str().unwrap().to_string();
         (status, error_type)
     }
 
     #[test]
-    fn bad_request_maps_to_400() {
-        let (status, kind) = extract_status_and_type(AppError::BadRequest(String::from("test")));
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(kind, "invalid_request_error");
-    }
-
-    #[test]
-    fn unsupported_format_maps_to_400() {
+    async fn bad_request_maps_to_400() {
         let (status, kind) =
-            extract_status_and_type(AppError::UnsupportedFormat(String::from("xyz")));
+            extract_status_and_type(AppError::BadRequest(String::from("test"))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(kind, "invalid_request_error");
     }
 
     #[test]
-    fn missing_field_maps_to_400() {
-        let (status, kind) = extract_status_and_type(AppError::MissingField("file"));
+    async fn unsupported_format_maps_to_400() {
+        let (status, kind) =
+            extract_status_and_type(AppError::UnsupportedFormat(String::from("xyz"))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(kind, "invalid_request_error");
     }
 
     #[test]
-    fn internal_maps_to_500() {
-        let (status, kind) = extract_status_and_type(AppError::Internal(String::from("oops")));
+    async fn missing_field_maps_to_400() {
+        let (status, kind) = extract_status_and_type(AppError::MissingField("file")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(kind, "invalid_request_error");
+    }
+
+    #[test]
+    async fn internal_maps_to_500() {
+        let (status, kind) =
+            extract_status_and_type(AppError::Internal(String::from("oops"))).await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(kind, "internal_error");
     }

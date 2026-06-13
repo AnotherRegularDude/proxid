@@ -1,0 +1,45 @@
+# Build artifacts
+target/
+
+# Version control
+.git/
+.gitignore
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment / secrets
+.personal/
+.env
+.env.*
+
+# Documentation
+*.md
+LICENSE
+
+# CI / CD
+.github/
+
+# Docker (no need to include itself)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Task runner (Dockerfile uses cargo directly)
+justfile
+
+# Project tooling
+.opencode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Tests (not needed in Docker image)
+tests/
+
+# Config overrides (default.toml is embedded via include_str!)
+config/test.toml

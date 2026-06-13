@@ -1,24 +1,19 @@
-use std::{io::Write, process::Stdio};
-
-pub use super::SourceAudio;
-pub use super::config::TranscoderConfig;
+use std::io::Write;
 
 use anyhow::{Result, bail};
 use bytes::Bytes;
-use tempfile::TempPath;
+use tempfile::NamedTempFile;
 use tokio::process::Command;
 
 use super::Transcoder;
 use crate::core::audio::{AudioFormat, OutputFormat};
 
+pub use super::SourceAudio;
+pub use super::config::TranscoderConfig;
+
+#[derive(Clone)]
 pub struct FfmpegTranscoder {
     cfg: TranscoderConfig,
-}
-
-impl Clone for FfmpegTranscoder {
-    fn clone(&self) -> Self {
-        Self { cfg: self.cfg.clone() }
-    }
 }
 
 impl FfmpegTranscoder {
@@ -27,102 +22,133 @@ impl FfmpegTranscoder {
     }
 }
 
+struct EncoderParams {
+    codec: &'static str,
+    sample_rate: u32,
+    channels: u16,
+    bitrate: i64,
+    ext: &'static str,
+    container_fmt: Option<&'static str>,
+}
+
 impl Transcoder for FfmpegTranscoder {
     async fn convert(&self, src: SourceAudio, target: OutputFormat) -> Result<Bytes> {
-        let input_path = write_source_to_tempfile(&src)?;
+        let input_tmp = write_source_to_tempfile(&src)?;
+        let input_str = input_tmp.path().to_string_lossy().to_string();
 
-        let (encoder_name, output_sr, output_channels, bitrate, output_ext, output_fmt) =
-            encoder_params(&self.cfg, target);
+        let params = encoder_params(&self.cfg, target);
 
         let output_tmp = tempfile::Builder::new()
             .prefix("proxid_out_")
-            .suffix(&format!(".{output_ext}"))
+            .suffix(&format!(".{}", params.ext))
             .tempfile()?;
-        let output_path = output_tmp.into_temp_path();
+        let output_str = output_tmp.path().to_string_lossy().to_string();
 
-        let mut input_args: Vec<String> = Vec::new();
-        if src.format == AudioFormat::Pcm {
-            // Hardcoded: 24 kHz / 16-bit / mono (OpenRouter TTS format)
-            input_args.push("-f".to_string());
-            input_args.push("s16le".to_string());
-            input_args.push("-ar".to_string());
-            input_args.push("24000".to_string());
-            input_args.push("-ac".to_string());
-            input_args.push("1".to_string());
+        let mut cmd = Command::new("ffmpeg");
+        cmd.arg("-hide_banner").arg("-loglevel").arg("warning");
+        if *src.format() == AudioFormat::Pcm {
+            cmd.arg("-f").arg("s16le").arg("-ar").arg("24000").arg("-ac").arg("1");
         }
-
-        let mut output_args = vec![
-            "-acodec".to_string(),
-            encoder_name.to_string(),
-            "-ar".to_string(),
-            output_sr.to_string(),
-            "-ac".to_string(),
-            output_channels.to_string(),
-        ];
-        if bitrate > 0 {
-            output_args.push("-b:a".to_string());
-            output_args.push(bitrate.to_string());
-        }
-        if let Some(fmt) = output_fmt {
-            output_args.push("-f".to_string());
-            output_args.push(fmt.to_string());
-        }
-        output_args.push("-y".to_string());
-
-        let input_str = input_path.to_string_lossy().to_string();
-        let output_str = output_path.to_string_lossy().to_string();
-
-        let status = Command::new("ffmpeg")
-            .arg("-hide_banner")
-            .arg("-loglevel")
-            .arg("warning")
-            .args(&input_args)
-            .arg("-i")
+        cmd.arg("-i")
             .arg(&input_str)
-            .args(&output_args)
-            .arg(&output_str)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await?;
+            .arg("-acodec")
+            .arg(params.codec)
+            .arg("-ar")
+            .arg(params.sample_rate.to_string())
+            .arg("-ac")
+            .arg(params.channels.to_string());
+        if params.bitrate > 0 {
+            cmd.arg("-b:a").arg(params.bitrate.to_string());
+        }
+        if let Some(fmt) = params.container_fmt {
+            cmd.arg("-f").arg(fmt);
+        }
+        cmd.arg("-y").arg(&output_str);
 
-        if !status.success() {
-            bail!("ffmpeg exited with non-zero status: {status}");
+        let output = cmd.output().await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("ffmpeg exited with status {}: {}", output.status, stderr.trim());
         }
 
-        let data = tokio::fs::read(&output_path).await?;
+        let data = tokio::fs::read(output_tmp.path()).await?;
 
         tracing::debug!("Data length: {}", data.len());
+
+        drop(input_tmp);
+        drop(output_tmp);
 
         Ok(Bytes::from(data))
     }
 }
 
-fn write_source_to_tempfile(src: &SourceAudio) -> Result<TempPath> {
-    let ext = match src.format {
-        AudioFormat::Pcm => "pcm",
-        other => other.into(),
-    };
+fn write_source_to_tempfile(src: &SourceAudio) -> Result<NamedTempFile> {
+    let ext = src.format().as_ref();
     let mut tmp = tempfile::Builder::new().suffix(&format!(".{ext}")).tempfile()?;
-    tmp.write_all(&src.bytes)?;
+    tmp.write_all(src.bytes())?;
     tmp.flush()?;
-    Ok(tmp.into_temp_path())
+    Ok(tmp)
 }
 
-fn encoder_params(
-    cfg: &TranscoderConfig,
-    target: OutputFormat,
-) -> (&'static str, u32, u16, i64, &'static str, Option<&'static str>) {
+fn encoder_params(cfg: &TranscoderConfig, target: OutputFormat) -> EncoderParams {
     match target {
-        OutputFormat::Mp3 => ("libmp3lame", 44_100, 1, cfg.mp3_bitrate_bps as i64, "mp3", None),
-        OutputFormat::Opus => ("libopus", 48_000, 1, cfg.opus_bitrate_bps as i64, "ogg", None),
-        OutputFormat::Aac => {
-            ("aac", cfg.pcm_sample_rate, 1, cfg.aac_bitrate_bps as i64, "aac", None)
-        }
-        OutputFormat::Flac => ("flac", cfg.pcm_sample_rate, 1, 0, "flac", None),
-        OutputFormat::Wav => ("pcm_s16le", cfg.pcm_sample_rate, 1, 0, "wav", None),
-        OutputFormat::Pcm => ("pcm_s16le", cfg.pcm_sample_rate, 1, 0, "pcm", Some("s16le")),
-        OutputFormat::SttWav => ("pcm_s16le", cfg.stt_sample_rate, 1, 0, "wav", None),
+        OutputFormat::Mp3 => EncoderParams {
+            codec: "libmp3lame",
+            sample_rate: 44_100,
+            channels: 1,
+            bitrate: *cfg.mp3_bitrate_bps() as i64,
+            ext: "mp3",
+            container_fmt: None,
+        },
+        OutputFormat::Opus => EncoderParams {
+            codec: "libopus",
+            sample_rate: 48_000,
+            channels: 1,
+            bitrate: *cfg.opus_bitrate_bps() as i64,
+            ext: "ogg",
+            container_fmt: None,
+        },
+        OutputFormat::Aac => EncoderParams {
+            codec: "aac",
+            sample_rate: *cfg.pcm_sample_rate(),
+            channels: 1,
+            bitrate: *cfg.aac_bitrate_bps() as i64,
+            ext: "aac",
+            container_fmt: None,
+        },
+        OutputFormat::Flac => EncoderParams {
+            codec: "flac",
+            sample_rate: *cfg.pcm_sample_rate(),
+            channels: 1,
+            bitrate: 0,
+            ext: "flac",
+            container_fmt: None,
+        },
+        OutputFormat::Wav => EncoderParams {
+            codec: "pcm_s16le",
+            sample_rate: *cfg.pcm_sample_rate(),
+            channels: 1,
+            bitrate: 0,
+            ext: "wav",
+            container_fmt: None,
+        },
+        OutputFormat::Pcm => EncoderParams {
+            codec: "pcm_s16le",
+            sample_rate: *cfg.pcm_sample_rate(),
+            channels: 1,
+            bitrate: 0,
+            ext: "pcm",
+            container_fmt: Some("s16le"),
+        },
+        OutputFormat::SttWav => EncoderParams {
+            codec: "pcm_s16le",
+            sample_rate: *cfg.stt_sample_rate(),
+            channels: 1,
+            bitrate: 0,
+            ext: "wav",
+            container_fmt: None,
+        },
     }
 }
 
@@ -140,34 +166,25 @@ mod tests {
     }
 
     fn test_cfg() -> TranscoderConfig {
-        TranscoderConfig {
-            stt_sample_rate: 16_000,
-            aac_bitrate_bps: 160_000,
-            mp3_bitrate_bps: 128_000,
-            opus_bitrate_bps: 64_000,
-            pcm_sample_rate: 24_000,
-        }
+        TranscoderConfig::new(16_000, 160_000, 128_000, 64_000, 24_000)
     }
 
-    fn convert(target: OutputFormat) -> Bytes {
+    async fn convert(target: OutputFormat) -> Bytes {
         let transcoder = FfmpegTranscoder::new(test_cfg()).unwrap();
-        let src = SourceAudio { bytes: make_silent_pcm(), format: AudioFormat::Pcm };
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(transcoder.convert(src, target))
-            .expect("conversion should succeed")
+        let src = SourceAudio::new(make_silent_pcm(), AudioFormat::Pcm);
+        transcoder.convert(src, target).await.expect("conversion should succeed")
     }
 
-    #[test]
-    fn pcm_to_wav_has_riff_header() {
-        let result = convert(OutputFormat::Wav);
+    #[tokio::test]
+    async fn pcm_to_wav_has_riff_header() {
+        let result = convert(OutputFormat::Wav).await;
         assert!(!result.is_empty());
         assert_eq!(&result[..4], b"RIFF", "WAV should start with RIFF");
     }
 
-    #[test]
-    fn pcm_to_mp3_has_sync_byte() {
-        let result = convert(OutputFormat::Mp3);
+    #[tokio::test]
+    async fn pcm_to_mp3_has_sync_byte() {
+        let result = convert(OutputFormat::Mp3).await;
         assert!(!result.is_empty());
         let first = result[0];
         assert!(
@@ -176,51 +193,45 @@ mod tests {
         );
     }
 
-    #[test]
-    fn pcm_to_opus_has_ogg_magic() {
-        let result = convert(OutputFormat::Opus);
+    #[tokio::test]
+    async fn pcm_to_opus_has_ogg_magic() {
+        let result = convert(OutputFormat::Opus).await;
         assert!(!result.is_empty());
         assert_eq!(&result[..4], b"OggS", "Opus container should start with OggS");
     }
 
-    #[test]
-    fn pcm_to_flac_has_flac_magic() {
-        let result = convert(OutputFormat::Flac);
+    #[tokio::test]
+    async fn pcm_to_flac_has_flac_magic() {
+        let result = convert(OutputFormat::Flac).await;
         assert!(!result.is_empty());
         assert_eq!(&result[..4], b"fLaC", "FLAC should start with fLaC");
     }
 
-    #[test]
-    fn pcm_to_aac_has_adts_sync() {
-        let result = convert(OutputFormat::Aac);
+    #[tokio::test]
+    async fn pcm_to_aac_has_adts_sync() {
+        let result = convert(OutputFormat::Aac).await;
         assert!(!result.is_empty());
         assert_eq!(result[0], 0xFF, "AAC should start with ADTS sync byte 0xFF");
     }
 
-    #[test]
-    fn pcm_to_pcm_preserves_expected_length() {
+    #[tokio::test]
+    async fn pcm_to_pcm_preserves_expected_length() {
         let input_len = make_silent_pcm().len();
-        let result = convert(OutputFormat::Pcm);
+        let result = convert(OutputFormat::Pcm).await;
         assert_eq!(result.len(), input_len, "PCM→PCM same sr should preserve byte count");
     }
 
-    #[test]
-    fn wav_to_sttwav_has_16khz_mono() {
+    #[tokio::test]
+    async fn wav_to_sttwav_has_16khz_mono() {
         let transcoder = FfmpegTranscoder::new(test_cfg()).unwrap();
         let wav_bytes = {
-            let src = SourceAudio { bytes: make_silent_pcm(), format: AudioFormat::Pcm };
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(transcoder.convert(src, OutputFormat::Wav))
-                .unwrap()
+            let src = SourceAudio::new(make_silent_pcm(), AudioFormat::Pcm);
+            transcoder.convert(src, OutputFormat::Wav).await.unwrap()
         };
 
         let result = {
-            let src = SourceAudio { bytes: wav_bytes, format: AudioFormat::Wav };
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(transcoder.convert(src, OutputFormat::SttWav))
-                .unwrap()
+            let src = SourceAudio::new(wav_bytes, AudioFormat::Wav);
+            transcoder.convert(src, OutputFormat::SttWav).await.unwrap()
         };
 
         assert!(!result.is_empty());
@@ -228,5 +239,35 @@ mod tests {
         assert_eq!(sr, 16_000, "SttWav sample rate must be 16000");
         let ch = u16::from_le_bytes([result[22], result[23]]);
         assert_eq!(ch, 1, "SttWav channels must be 1");
+    }
+
+    #[test]
+    fn encoder_params_returns_correct_values() {
+        let cfg = test_cfg();
+
+        let params = encoder_params(&cfg, OutputFormat::Mp3);
+        assert_eq!(params.codec, "libmp3lame");
+        assert_eq!(params.sample_rate, 44_100);
+        assert_eq!(params.channels, 1);
+        assert_eq!(params.bitrate, 128_000);
+        assert_eq!(params.ext, "mp3");
+        assert!(params.container_fmt.is_none());
+
+        let params = encoder_params(&cfg, OutputFormat::Opus);
+        assert_eq!(params.codec, "libopus");
+        assert_eq!(params.sample_rate, 48_000);
+        assert_eq!(params.bitrate, 64_000);
+        assert_eq!(params.ext, "ogg");
+
+        let params = encoder_params(&cfg, OutputFormat::Pcm);
+        assert_eq!(params.codec, "pcm_s16le");
+        assert_eq!(params.sample_rate, 24_000);
+        assert_eq!(params.container_fmt, Some("s16le"));
+
+        let params = encoder_params(&cfg, OutputFormat::SttWav);
+        assert_eq!(params.codec, "pcm_s16le");
+        assert_eq!(params.sample_rate, 16_000);
+        assert_eq!(params.ext, "wav");
+        assert!(params.container_fmt.is_none());
     }
 }

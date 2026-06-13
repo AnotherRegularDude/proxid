@@ -19,5 +19,5 @@ pub async fn transcriptions<T: Transcoder>(
     let svc = TranscriptionService::from_state(&state);
     let out = svc.run(form).await?;
 
-    Ok(Json::from(TranscriptionResponseBody { text: out.text }))
+    Ok(Json::from(TranscriptionResponseBody::new(out.text().clone())))
 }

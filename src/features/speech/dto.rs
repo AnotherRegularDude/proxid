@@ -7,31 +7,57 @@ use crate::core::audio::{AudioFormat, OutputFormat};
 use crate::core::error::{AppError, AppResult};
 use crate::infrastructure::transcoder::Transcoder;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, accessory::Accessors)]
+#[access(get)]
 pub struct SpeechRequestBody {
-    pub model: Option<String>,
-    pub input: String,
-    pub voice: String,
-    pub response_format: Option<String>,
-    pub speed: Option<f32>,
+    model: Option<String>,
+    input: String,
+    voice: String,
+    response_format: Option<String>,
+    speed: Option<f32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, accessory::Accessors)]
+#[access(get)]
 pub(super) struct SpeechRequest {
-    pub model: String,
-    pub input: String,
-    pub voice: String,
-    pub response_format: AudioFormat,
-    pub speed: Option<f32>,
+    model: String,
+    input: String,
+    voice: String,
+    response_format: AudioFormat,
+    speed: Option<f32>,
+}
+
+impl SpeechRequest {
+    pub fn new(
+        model: String,
+        input: String,
+        voice: String,
+        response_format: AudioFormat,
+        speed: Option<f32>,
+    ) -> Self {
+        Self { model, input, voice, response_format, speed }
+    }
 }
 
 impl SpeechRequestBody {
+    #[cfg(test)]
+    pub fn new(
+        model: Option<String>,
+        input: String,
+        voice: String,
+        response_format: Option<String>,
+        speed: Option<f32>,
+    ) -> Self {
+        Self { model, input, voice, response_format, speed }
+    }
+
     pub(super) fn into_request<T: Transcoder>(
         self,
         state: &AppState<T>,
     ) -> AppResult<SpeechRequest> {
-        let model =
-            self.model.unwrap_or_else(|| state.settings().provider.default_speech_model.clone());
+        let model = self
+            .model
+            .unwrap_or_else(|| state.settings().provider().default_speech_model().clone());
 
         let response_format = match self.response_format.as_deref() {
             None => AudioFormat::Mp3,
@@ -62,13 +88,7 @@ impl SpeechRequestBody {
             return Err(AppError::MissingField("voice"));
         }
 
-        Ok(SpeechRequest {
-            model,
-            input: self.input,
-            voice: self.voice,
-            response_format,
-            speed: self.speed,
-        })
+        Ok(SpeechRequest::new(model, self.input, self.voice, response_format, self.speed))
     }
 }
 
@@ -110,31 +130,26 @@ filter = "proxid=warn"
     #[test]
     fn into_request_valid_with_defaults() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: None,
-            speed: None,
-        };
+        let body =
+            SpeechRequestBody::new(None, "hello".to_string(), "alloy".to_string(), None, None);
         let req = body.into_request(&state).unwrap();
-        assert_eq!(req.model, "test/tts");
-        assert_eq!(req.response_format, AudioFormat::Mp3);
-        assert_eq!(req.input, "hello");
-        assert_eq!(req.voice, "alloy");
-        assert!(req.speed.is_none());
+        assert_eq!(*req.model(), "test/tts");
+        assert_eq!(*req.response_format(), AudioFormat::Mp3);
+        assert_eq!(req.input(), "hello");
+        assert_eq!(req.voice(), "alloy");
+        assert!(req.speed().is_none());
     }
 
     #[test]
     fn into_request_invalid_format_returns_bad_request() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: Some("xyz".to_string()),
-            speed: None,
-        };
+        let body = SpeechRequestBody::new(
+            None,
+            "hello".to_string(),
+            "alloy".to_string(),
+            Some("xyz".to_string()),
+            None,
+        );
         let err = body.into_request(&state).unwrap_err();
         assert!(matches!(err, AppError::BadRequest(_)));
     }
@@ -142,13 +157,8 @@ filter = "proxid=warn"
     #[test]
     fn into_request_speed_too_low_returns_bad_request() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: None,
-            speed: Some(0.1),
-        };
+        let body =
+            SpeechRequestBody::new(None, "hello".to_string(), "alloy".to_string(), None, Some(0.1));
         let err = body.into_request(&state).unwrap_err();
         assert!(matches!(err, AppError::BadRequest(_)));
     }
@@ -156,13 +166,8 @@ filter = "proxid=warn"
     #[test]
     fn into_request_speed_too_high_returns_bad_request() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: None,
-            speed: Some(5.0),
-        };
+        let body =
+            SpeechRequestBody::new(None, "hello".to_string(), "alloy".to_string(), None, Some(5.0));
         let err = body.into_request(&state).unwrap_err();
         assert!(matches!(err, AppError::BadRequest(_)));
     }
@@ -170,41 +175,36 @@ filter = "proxid=warn"
     #[test]
     fn into_request_speed_at_lower_bound_is_valid() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: None,
-            speed: Some(0.25),
-        };
+        let body = SpeechRequestBody::new(
+            None,
+            "hello".to_string(),
+            "alloy".to_string(),
+            None,
+            Some(0.25),
+        );
         let req = body.into_request(&state).unwrap();
-        assert_eq!(req.speed, Some(0.25));
+        assert_eq!(*req.speed(), Some(0.25));
     }
 
     #[test]
     fn into_request_speed_at_upper_bound_is_valid() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: None,
-            speed: Some(4.0),
-        };
+        let body =
+            SpeechRequestBody::new(None, "hello".to_string(), "alloy".to_string(), None, Some(4.0));
         let req = body.into_request(&state).unwrap();
-        assert_eq!(req.speed, Some(4.0));
+        assert_eq!(*req.speed(), Some(4.0));
     }
 
     #[test]
     fn into_request_unsupported_format_for_speech_returns_bad_request() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: "alloy".to_string(),
-            response_format: Some("m4a".to_string()),
-            speed: None,
-        };
+        let body = SpeechRequestBody::new(
+            None,
+            "hello".to_string(),
+            "alloy".to_string(),
+            Some("m4a".to_string()),
+            None,
+        );
         let err = body.into_request(&state).unwrap_err();
         assert!(matches!(err, AppError::BadRequest(_)));
     }
@@ -212,13 +212,7 @@ filter = "proxid=warn"
     #[test]
     fn into_request_empty_voice_returns_missing_field() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: "hello".to_string(),
-            voice: String::new(),
-            response_format: None,
-            speed: None,
-        };
+        let body = SpeechRequestBody::new(None, "hello".to_string(), String::new(), None, None);
         let err = body.into_request(&state).unwrap_err();
         assert!(matches!(err, AppError::MissingField("voice")));
     }
@@ -226,13 +220,7 @@ filter = "proxid=warn"
     #[test]
     fn into_request_empty_input_returns_missing_field() {
         let state = test_state();
-        let body = SpeechRequestBody {
-            model: None,
-            input: String::new(),
-            voice: "alloy".to_string(),
-            response_format: None,
-            speed: None,
-        };
+        let body = SpeechRequestBody::new(None, String::new(), "alloy".to_string(), None, None);
         let err = body.into_request(&state).unwrap_err();
         assert!(matches!(err, AppError::MissingField("input")));
     }

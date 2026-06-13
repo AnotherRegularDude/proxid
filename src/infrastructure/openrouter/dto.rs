@@ -2,63 +2,92 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::usage::Usage;
 
-#[derive(Serialize)]
+#[derive(Serialize, accessory::Accessors)]
+#[access(get)]
 pub struct TranscriptionRequestDto {
-    pub model: String,
-    pub input_audio: InputAudioDto,
+    model: String,
+    input_audio: InputAudioDto,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
+    temperature: Option<f32>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, accessory::Accessors)]
+#[access(get)]
 pub struct InputAudioDto {
-    pub data: String,
-    pub format: &'static str,
+    data: String,
+    format: &'static str,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, accessory::Accessors)]
+#[access(get)]
 pub struct TranscriptionResponseDto {
-    pub text: String,
-    pub usage: Option<UsageDto>,
+    text: String,
+    usage: Option<UsageDto>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, accessory::Accessors)]
+#[access(get)]
 pub struct UsageDto {
-    pub seconds: Option<f64>,
-    pub cost: Option<f64>,
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
+    seconds: Option<f64>,
+    cost: Option<f64>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+}
+
+#[derive(Serialize, accessory::Accessors)]
+#[access(get, defaults(all(cp)))]
+pub struct SpeechRequestDto<'a> {
+    model: &'a str,
+    input: &'a str,
+    voice: &'a str,
+    response_format: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speed: Option<f32>,
+}
+
+#[derive(Deserialize, accessory::Accessors)]
+#[access(get)]
+pub struct ErrorResponseDto {
+    error: ErrorDetailDto,
+}
+
+#[derive(Deserialize, accessory::Accessors)]
+#[access(get)]
+pub struct ErrorDetailDto {
+    #[allow(
+        dead_code,
+        reason = "deserialized for API contract; may be used for error categorization"
+    )]
+    code: serde_json::Value,
+    message: String,
+}
+
+impl TranscriptionRequestDto {
+    pub fn new(model: String, input_audio: InputAudioDto, temperature: Option<f32>) -> Self {
+        Self { model, input_audio, temperature }
+    }
+}
+
+impl InputAudioDto {
+    pub fn new(data: String, format: &'static str) -> Self {
+        Self { data, format }
+    }
+}
+
+impl<'a> SpeechRequestDto<'a> {
+    pub fn new(
+        model: &'a str,
+        input: &'a str,
+        voice: &'a str,
+        response_format: &'static str,
+        speed: Option<f32>,
+    ) -> Self {
+        Self { model, input, voice, response_format, speed }
+    }
 }
 
 impl From<UsageDto> for Usage {
     fn from(u: UsageDto) -> Self {
-        Self {
-            seconds: u.seconds,
-            cost: u.cost,
-            input_tokens: u.input_tokens,
-            output_tokens: u.output_tokens,
-        }
+        Self::new(*u.seconds(), *u.cost(), *u.input_tokens(), *u.output_tokens())
     }
-}
-
-#[derive(Serialize)]
-pub struct SpeechRequestDto<'a> {
-    pub model: &'a str,
-    pub input: &'a str,
-    pub voice: &'a str,
-    pub response_format: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub speed: Option<f32>,
-}
-
-#[derive(Deserialize)]
-pub struct ErrorResponseDto {
-    pub error: ErrorDetailDto,
-}
-
-#[derive(Deserialize)]
-pub struct ErrorDetailDto {
-    #[allow(dead_code)]
-    pub code: Option<i32>,
-    pub message: String,
 }

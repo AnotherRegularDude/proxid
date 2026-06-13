@@ -1,6 +1,13 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, accessory::Accessors)]
+#[access(get)]
 pub struct TranscriptionResponseBody {
-    pub text: String,
+    text: String,
+}
+
+impl TranscriptionResponseBody {
+    pub fn new(text: String) -> Self {
+        Self { text }
+    }
 }

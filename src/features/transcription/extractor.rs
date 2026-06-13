@@ -8,17 +8,31 @@ use crate::core::audio::AudioFormat;
 use crate::core::error::{AppError, AppResult};
 use crate::infrastructure::transcoder::Transcoder;
 
+#[derive(accessory::Accessors)]
+#[access(get)]
 pub(super) struct UploadedAudio {
-    pub bytes: Bytes,
-    pub format: AudioFormat,
-    #[allow(dead_code)]
-    pub filename: String,
+    bytes: Bytes,
+    format: AudioFormat,
 }
 
+#[derive(accessory::Accessors)]
+#[access(get)]
 pub(super) struct TranscriptionForm {
-    pub audio: UploadedAudio,
-    pub model: String,
-    pub temperature: Option<f32>,
+    audio: UploadedAudio,
+    model: String,
+    temperature: Option<f32>,
+}
+
+impl UploadedAudio {
+    pub fn new(bytes: Bytes, format: AudioFormat) -> Self {
+        Self { bytes, format }
+    }
+}
+
+impl TranscriptionForm {
+    pub fn new(audio: UploadedAudio, model: String, temperature: Option<f32>) -> Self {
+        Self { audio, model, temperature }
+    }
 }
 
 pub(super) async fn parse_transcription_form<T: Transcoder>(
@@ -26,7 +40,7 @@ pub(super) async fn parse_transcription_form<T: Transcoder>(
     state: &AppState<T>,
 ) -> AppResult<TranscriptionForm> {
     let mut audio: Option<UploadedAudio> = None;
-    let model = state.provider().default_transcription_model().to_string();
+    let mut model = state.provider().default_transcription_model().to_string();
     let mut temperature: Option<f32> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
@@ -43,7 +57,7 @@ pub(super) async fn parse_transcription_form<T: Transcoder>(
                 let ext = std::path::Path::new(&filename)
                     .extension()
                     .and_then(|ext| ext.to_str())
-                    .ok_or_else(|| AppError::Internal("Can't parse filename".to_string()))?;
+                    .ok_or_else(|| AppError::BadRequest("missing file extension".to_string()))?;
 
                 let format = AudioFormat::from_str(ext).map_err(|_| {
                     tracing::warn!(ext = %ext, filename = %filename, "unsupported audio format");
@@ -55,7 +69,17 @@ pub(super) async fn parse_transcription_form<T: Transcoder>(
                     AppError::BadRequest(format!("failed to read file: {e}"))
                 })?;
 
-                audio = Some(UploadedAudio { bytes: data, format, filename });
+                tracing::info!(filename = %filename, ext = %ext, format = %format, "parsing completed");
+                audio = Some(UploadedAudio::new(data, format));
+            }
+            "model" => {
+                let text = field.text().await.map_err(|e| {
+                    tracing::error!(error = %e, "failed to read model field");
+                    AppError::BadRequest(format!("failed to read model: {e}"))
+                })?;
+                if !text.is_empty() {
+                    model = text;
+                }
             }
             "temperature" => {
                 let text = field.text().await.map_err(|e| {
@@ -65,7 +89,7 @@ pub(super) async fn parse_transcription_form<T: Transcoder>(
                 let Ok(temp) = text.parse::<f32>() else {
                     return Err(AppError::BadRequest(format!("invalid temperature: {text}")));
                 };
-                let _ = temperature.insert(temp);
+                temperature = Some(temp);
             }
             _ => {}
         }
@@ -73,5 +97,5 @@ pub(super) async fn parse_transcription_form<T: Transcoder>(
 
     let audio = audio.ok_or(AppError::MissingField("file"))?;
 
-    Ok(TranscriptionForm { audio, model, temperature })
+    Ok(TranscriptionForm::new(audio, model, temperature))
 }

@@ -53,10 +53,7 @@ fn figment_with_merged_custom_config(merged_data: Option<MergedData>) -> Figment
     };
 
     match data {
-        MergedData::File(path) => {
-            tracing::debug!(path = %path, "merging custom config file");
-            figment.merge(Toml::file(path))
-        }
+        MergedData::File(path) => figment.merge(Toml::file(path)),
         MergedData::Content(content) => figment.merge(Toml::string(&content)),
     }
 }
@@ -101,8 +98,8 @@ filter = "proxid=warn"
             .load()
             .unwrap();
 
-        assert_eq!(settings.server.port, 9999);
-        assert_eq!(settings.provider.default_transcription_model, "test-model");
+        assert_eq!(*settings.server().port(), 9999);
+        assert_eq!(settings.provider().default_transcription_model(), "test-model");
     }
 
     #[test]
@@ -117,9 +114,12 @@ api_key = "sk-test-key"
             .load()
             .expect("Properly load custom config from TOML string");
 
-        assert_eq!(settings.server.port, 8800);
-        assert_eq!(settings.provider.default_transcription_model, "openai/whisper-large-v3");
-        assert_eq!(settings.provider.request_timeout_secs, 60);
+        assert_eq!(*settings.server().port(), 8800);
+        assert_eq!(
+            settings.provider().default_transcription_model(),
+            "openai/whisper-large-v3-turbo"
+        );
+        assert_eq!(settings.provider().request_timeout_secs(), 60);
     }
 
     #[test]
@@ -145,7 +145,7 @@ api_key = "sk-test-key"
             .load()
             .expect("Properly load custom config from TOML file");
 
-        assert_eq!(settings.provider.api_key(), "test-key");
-        assert_eq!(settings.server.port, 8899);
+        assert_eq!(settings.provider().api_key(), "test-key");
+        assert_eq!(*settings.server().port(), 8899);
     }
 }

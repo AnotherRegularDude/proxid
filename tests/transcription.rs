@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, header};
 use tower::ServiceExt;
 
-use common::{load_fixture, response_body, spawn_app};
+use common::{load_fixture, make_multipart_body, response_body, spawn_app};
 
 fn make_test_wav() -> Vec<u8> {
     common::load_fixture("sample.wav").to_vec()
@@ -27,20 +27,11 @@ async fn transcription_happy_path() {
 
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
     let wav_data = make_test_wav();
-    let body_prefix = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n\
-         Content-Type: audio/wav\r\n\r\n"
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "test.wav", "audio/wav", &wav_data)),
+        &[("model", "openai/whisper-large-v3")],
     );
-    let body_suffix = format!(
-        "\r\n--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"model\"\r\n\r\n\
-         openai/whisper-large-v3\r\n\
-         --{boundary}--\r\n"
-    );
-
-    let full_body: Vec<u8> =
-        body_prefix.bytes().chain(wav_data.iter().copied()).chain(body_suffix.bytes()).collect();
 
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")
@@ -65,18 +56,13 @@ async fn transcription_missing_file_returns_400() {
     let app = spawn_app(&server.url()).await;
 
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-    let body_str = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"model\"\r\n\r\n\
-         openai/whisper-large-v3\r\n\
-         --{boundary}--\r\n"
-    );
+    let full_body = make_multipart_body(boundary, None, &[("model", "openai/whisper-large-v3")]);
 
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")
         .method("POST")
         .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
-        .body(Body::from(body_str))
+        .body(Body::from(full_body))
         .unwrap();
 
     let resp = app.oneshot(req).await.unwrap();
@@ -93,19 +79,17 @@ async fn transcription_unsupported_format_returns_400() {
     let app = spawn_app(&server.url()).await;
 
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-    let body_str = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"file\"; filename=\"test.xyz\"\r\n\
-         Content-Type: application/octet-stream\r\n\r\n\
-         some data\r\n\
-         --{boundary}--\r\n"
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "test.xyz", "application/octet-stream", b"some data")),
+        &[],
     );
 
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")
         .method("POST")
         .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
-        .body(Body::from(body_str))
+        .body(Body::from(full_body))
         .unwrap();
 
     let resp = app.oneshot(req).await.unwrap();
@@ -131,16 +115,8 @@ async fn transcription_upstream_401_maps_to_500() {
 
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
     let wav_data = make_test_wav();
-    let body_str = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n\
-         Content-Type: audio/wav\r\n\r\n"
-    );
-    let full_body: Vec<u8> = body_str
-        .bytes()
-        .chain(wav_data.iter().copied())
-        .chain(format!("\r\n--{boundary}--\r\n").bytes())
-        .collect();
+    let full_body =
+        make_multipart_body(boundary, Some(("file", "test.wav", "audio/wav", &wav_data)), &[]);
 
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")
@@ -172,17 +148,8 @@ async fn transcription_upstream_429_maps_to_500() {
 
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
     let wav_data = make_test_wav();
-    let body_str = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n\
-         Content-Type: audio/wav\r\n\r\n"
-    );
-    let full_body: Vec<u8> = body_str
-        .bytes()
-        .chain(wav_data.iter().copied())
-        .chain(format!("\r\n--{boundary}--\r\n").bytes())
-        .collect();
-
+    let full_body =
+        make_multipart_body(boundary, Some(("file", "test.wav", "audio/wav", &wav_data)), &[]);
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")
         .method("POST")
@@ -215,20 +182,11 @@ async fn transcription_happy_path_with_fixture_wav() {
 
     let wav_data = load_fixture("sample.wav");
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-    let body_prefix = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"file\"; filename=\"sample.wav\"\r\n\
-         Content-Type: audio/wav\r\n\r\n"
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "sample.wav", "audio/wav", &wav_data)),
+        &[("model", "openai/whisper-large-v3")],
     );
-    let body_suffix = format!(
-        "\r\n--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"model\"\r\n\r\n\
-         openai/whisper-large-v3\r\n\
-         --{boundary}--\r\n"
-    );
-
-    let full_body: Vec<u8> =
-        body_prefix.bytes().chain(wav_data.iter().copied()).chain(body_suffix.bytes()).collect();
 
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")
@@ -248,6 +206,118 @@ async fn transcription_happy_path_with_fixture_wav() {
 }
 
 #[tokio::test]
+async fn transcription_custom_model_sent_to_provider() {
+    let mut server = mockito::Server::new_async().await;
+
+    let mock = server
+        .mock("POST", "/audio/transcriptions")
+        .match_header("Authorization", "Bearer sk-test-key")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+            "model": "custom/stt-model"
+        })))
+        .with_status(200)
+        .with_body(r#"{"text":"custom model ok"}"#)
+        .create_async()
+        .await;
+
+    let app = spawn_app(&server.url()).await;
+
+    let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+    let wav_data = make_test_wav();
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "test.wav", "audio/wav", &wav_data)),
+        &[("model", "custom/stt-model")],
+    );
+
+    let req = Request::builder()
+        .uri("/api/v1/audio/transcriptions")
+        .method("POST")
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(full_body))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    let (status, body) = response_body(resp).await;
+    assert_eq!(status, 200);
+
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["text"], "custom model ok");
+
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn transcription_temperature_sent_to_provider() {
+    let mut server = mockito::Server::new_async().await;
+
+    let mock = server
+        .mock("POST", "/audio/transcriptions")
+        .match_header("Authorization", "Bearer sk-test-key")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+            "temperature": 0.2
+        })))
+        .with_status(200)
+        .with_body(r#"{"text":"temperature ok"}"#)
+        .create_async()
+        .await;
+
+    let app = spawn_app(&server.url()).await;
+
+    let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+    let wav_data = make_test_wav();
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "test.wav", "audio/wav", &wav_data)),
+        &[("temperature", "0.2")],
+    );
+
+    let req = Request::builder()
+        .uri("/api/v1/audio/transcriptions")
+        .method("POST")
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(full_body))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    let (status, body) = response_body(resp).await;
+    assert_eq!(status, 200);
+
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["text"], "temperature ok");
+
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn transcription_invalid_temperature_returns_400() {
+    let server = mockito::Server::new_async().await;
+    let app = spawn_app(&server.url()).await;
+
+    let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+    let wav_data = make_test_wav();
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "test.wav", "audio/wav", &wav_data)),
+        &[("temperature", "not-a-number")],
+    );
+
+    let req = Request::builder()
+        .uri("/api/v1/audio/transcriptions")
+        .method("POST")
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(full_body))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    let (status, body) = response_body(resp).await;
+    assert_eq!(status, 400);
+
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["error"]["type"], "invalid_request_error");
+}
+
+#[tokio::test]
 async fn transcription_mp3_input_works() {
     let mut server = mockito::Server::new_async().await;
 
@@ -264,20 +334,11 @@ async fn transcription_mp3_input_works() {
 
     let mp3_data = load_fixture("sample.mp3");
     let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-    let body_prefix = format!(
-        "--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"file\"; filename=\"sample.mp3\"\r\n\
-         Content-Type: audio/mpeg\r\n\r\n"
+    let full_body = make_multipart_body(
+        boundary,
+        Some(("file", "sample.mp3", "audio/mpeg", &mp3_data)),
+        &[("model", "openai/whisper-large-v3")],
     );
-    let body_suffix = format!(
-        "\r\n--{boundary}\r\n\
-         Content-Disposition: form-data; name=\"model\"\r\n\r\n\
-         openai/whisper-large-v3\r\n\
-         --{boundary}--\r\n"
-    );
-
-    let full_body: Vec<u8> =
-        body_prefix.bytes().chain(mp3_data.iter().copied()).chain(body_suffix.bytes()).collect();
 
     let req = Request::builder()
         .uri("/api/v1/audio/transcriptions")

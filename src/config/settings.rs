@@ -3,47 +3,54 @@ use serde::Deserialize;
 use std::net::IpAddr;
 use url::Url;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, accessory::Accessors)]
+#[access(get)]
 pub struct Settings {
-    pub server: ServerConfig,
-    pub provider: OpenRouterConfig,
-    pub audio: AudioConfig,
-    pub logging: LoggingConfig,
+    server: ServerConfig,
+    provider: OpenRouterConfig,
+    audio: AudioConfig,
+    logging: LoggingConfig,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, accessory::Accessors)]
+#[access(get)]
 pub struct ServerConfig {
-    pub host: IpAddr,
-    pub port: u16,
+    host: IpAddr,
+    port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, accessory::Accessors)]
+#[access(get)]
 pub struct OpenRouterConfig {
-    pub base_url: Url,
+    base_url: Url,
+    #[access(skip)]
     api_key: SecretString,
-    pub default_transcription_model: String,
-    pub default_speech_model: String,
-    pub request_timeout_secs: u64,
-    pub app_name: Option<String>,
-    pub app_referer: Option<Url>,
+    default_transcription_model: String,
+    default_speech_model: String,
+    #[access(get(cp))]
+    request_timeout_secs: u64,
+    app_name: Option<String>,
+    app_referer: Option<Url>,
+}
+
+#[derive(Debug, Clone, Deserialize, accessory::Accessors)]
+#[access(get)]
+pub struct LoggingConfig {
+    filter: String,
+}
+
+#[derive(Debug, Clone, Deserialize, accessory::Accessors)]
+#[access(get, defaults(get(cp)))]
+pub struct AudioConfig {
+    stt_sample_rate: u32,
+    aac_bitrate_bps: u32,
+    mp3_bitrate_bps: u32,
+    opus_bitrate_bps: u32,
+    pcm_sample_rate: u32,
 }
 
 impl OpenRouterConfig {
     pub fn api_key(&self) -> &str {
         self.api_key.expose_secret()
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LoggingConfig {
-    pub filter: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AudioConfig {
-    pub stt_sample_rate: u32,
-    pub aac_bitrate_bps: u32,
-    pub mp3_bitrate_bps: u32,
-    pub opus_bitrate_bps: u32,
-    pub pcm_sample_rate: u32,
 }

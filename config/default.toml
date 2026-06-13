@@ -1,10 +1,10 @@
 [server]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 8800
 
 [provider]
 base_url = "https://openrouter.ai/api/v1"
-default_transcription_model = "openai/whisper-large-v3"
+default_transcription_model = "openai/whisper-large-v3-turbo"
 default_speech_model = "google/gemini-3.1-flash-tts-preview"
 request_timeout_secs = 60
 

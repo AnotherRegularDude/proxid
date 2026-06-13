@@ -17,6 +17,17 @@ pub enum AudioFormat {
     Pcm,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    SttWav,
+    Mp3,
+    Opus,
+    Aac,
+    Flac,
+    Wav,
+    Pcm,
+}
+
 impl AudioFormat {
     pub fn mime(self) -> &'static str {
         match self {
@@ -34,17 +45,6 @@ impl AudioFormat {
             Self::Pcm => "audio/L16",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputFormat {
-    SttWav,
-    Mp3,
-    Opus,
-    Aac,
-    Flac,
-    Wav,
-    Pcm,
 }
 
 impl OutputFormat {
