@@ -47,6 +47,11 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
