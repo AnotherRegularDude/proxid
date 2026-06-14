@@ -9,11 +9,12 @@ default_speech_model = "google/gemini-3.1-flash-tts-preview"
 request_timeout_secs = 60
 
 [audio]
-stt_sample_rate = 16000
+pcm_sample_rate = 24000
+stt_sample_rate = 44100
+
 aac_bitrate_bps = 160000
 mp3_bitrate_bps = 128000
 opus_bitrate_bps = 64000
-pcm_sample_rate = 24000
 
 [logging]
 filter = "proxid=debug,tower_http=info"

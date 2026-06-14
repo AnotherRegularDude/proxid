@@ -8,19 +8,15 @@ use crate::core::audio::AudioFormat;
 use crate::core::error::{AppError, AppResult};
 use crate::infrastructure::transcoder::Transcoder;
 
-#[derive(accessory::Accessors)]
-#[access(get)]
-pub(super) struct UploadedAudio {
-    bytes: Bytes,
-    format: AudioFormat,
+pub struct UploadedAudio {
+    pub bytes: Bytes,
+    pub format: AudioFormat,
 }
 
-#[derive(accessory::Accessors)]
-#[access(get)]
-pub(super) struct TranscriptionForm {
-    audio: UploadedAudio,
-    model: String,
-    temperature: Option<f32>,
+pub struct TranscriptionForm {
+    pub audio: UploadedAudio,
+    pub model: String,
+    pub temperature: Option<f32>,
 }
 
 impl UploadedAudio {
@@ -35,7 +31,7 @@ impl TranscriptionForm {
     }
 }
 
-pub(super) async fn parse_transcription_form<T: Transcoder>(
+pub async fn parse_transcription_form<T: Transcoder>(
     mut multipart: Multipart,
     state: &AppState<T>,
 ) -> AppResult<TranscriptionForm> {

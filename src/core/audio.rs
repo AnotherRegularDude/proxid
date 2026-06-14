@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, EnumString, AsRefStr, IntoStaticStr)]
@@ -17,15 +18,10 @@ pub enum AudioFormat {
     Pcm,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputFormat {
-    SttWav,
-    Mp3,
-    Opus,
-    Aac,
-    Flac,
-    Wav,
-    Pcm,
+#[derive(Debug, Clone)]
+pub struct SourceAudio {
+    pub bytes: Bytes,
+    pub format: AudioFormat,
 }
 
 impl AudioFormat {
@@ -47,17 +43,9 @@ impl AudioFormat {
     }
 }
 
-impl OutputFormat {
-    pub fn for_speech(format: AudioFormat) -> Option<Self> {
-        match format {
-            AudioFormat::Mp3 => Some(Self::Mp3),
-            AudioFormat::Opus => Some(Self::Opus),
-            AudioFormat::Aac => Some(Self::Aac),
-            AudioFormat::Flac => Some(Self::Flac),
-            AudioFormat::Wav => Some(Self::Wav),
-            AudioFormat::Pcm => Some(Self::Pcm),
-            _ => None,
-        }
+impl SourceAudio {
+    pub fn new(bytes: Bytes, format: AudioFormat) -> Self {
+        Self { bytes, format }
     }
 }
 
@@ -100,25 +88,5 @@ mod tests {
         assert_eq!(AudioFormat::Mp3.mime(), "audio/mpeg");
         assert_eq!(AudioFormat::Pcm.mime(), "audio/L16");
         assert_eq!(AudioFormat::Wav.mime(), "audio/wav");
-    }
-
-    #[test]
-    fn for_speech_supported_formats() {
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Mp3), Some(OutputFormat::Mp3));
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Opus), Some(OutputFormat::Opus));
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Aac), Some(OutputFormat::Aac));
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Flac), Some(OutputFormat::Flac));
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Wav), Some(OutputFormat::Wav));
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Pcm), Some(OutputFormat::Pcm));
-    }
-
-    #[test]
-    fn for_speech_unsupported_formats() {
-        assert_eq!(OutputFormat::for_speech(AudioFormat::M4a), None);
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Ogg), None);
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Webm), None);
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Mp4), None);
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Mpeg), None);
-        assert_eq!(OutputFormat::for_speech(AudioFormat::Mpga), None);
     }
 }

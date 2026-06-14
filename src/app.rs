@@ -8,7 +8,7 @@ use crate::features::meta::routes::routes as meta_routes;
 use crate::features::speech::routes::routes as speech_routes;
 use crate::features::transcription::routes::routes as transcription_routes;
 use crate::infrastructure::openrouter::OpenRouterClient;
-use crate::infrastructure::transcoder::{FfmpegTranscoder, Transcoder, TranscoderConfig};
+use crate::infrastructure::transcoder::{FfmpegTranscoder, Transcoder};
 
 /// Maximum request body size (25 MB) — accommodates large audio uploads.
 const MAX_BODY_SIZE: usize = 25 * 1024 * 1024;
@@ -57,8 +57,7 @@ pub fn build_state(settings: Settings) -> anyhow::Result<AppState<FfmpegTranscod
         .app_name(settings.provider().app_name().clone())
         .build()?;
 
-    let transcoder_cfg = TranscoderConfig::from(settings.audio());
-    let transcoder = FfmpegTranscoder::new(transcoder_cfg)?;
+    let transcoder = FfmpegTranscoder::new(settings.audio().into())?;
 
     tracing::debug!(default_model = %settings.provider().default_transcription_model(), "provider client built");
     Ok(AppState {

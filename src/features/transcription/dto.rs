@@ -1,9 +1,8 @@
 use serde::Serialize;
 
-#[derive(Serialize, accessory::Accessors)]
-#[access(get)]
+#[derive(Serialize)]
 pub struct TranscriptionResponseBody {
-    text: String,
+    pub text: String,
 }
 
 impl TranscriptionResponseBody {

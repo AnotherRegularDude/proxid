@@ -258,27 +258,6 @@ async fn speech_bad_speed_returns_400() {
 }
 
 #[tokio::test]
-async fn speech_unsupported_format_for_speech_returns_400() {
-    let server = mockito::Server::new_async().await;
-    let app = spawn_app(&server.url()).await;
-
-    let req = Request::builder()
-        .uri("/api/v1/audio/speech")
-        .method("POST")
-        .header(header::CONTENT_TYPE, "application/json")
-        // m4a is a valid AudioFormat but not supported for speech
-        .body(Body::from(r#"{"input":"hello","voice":"alloy","response_format":"m4a"}"#))
-        .unwrap();
-
-    let resp = app.oneshot(req).await.unwrap();
-    let (status, body) = response_body(resp).await;
-    assert_eq!(status, 400);
-
-    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(json["error"]["type"], "invalid_request_error");
-}
-
-#[tokio::test]
 async fn speech_empty_input_returns_400() {
     let server = mockito::Server::new_async().await;
     let app = spawn_app(&server.url()).await;

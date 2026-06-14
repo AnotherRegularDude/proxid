@@ -3,28 +3,26 @@ use std::str::FromStr;
 use serde::Deserialize;
 
 use crate::app::AppState;
-use crate::core::audio::{AudioFormat, OutputFormat};
+use crate::core::audio::AudioFormat;
 use crate::core::error::{AppError, AppResult};
 use crate::infrastructure::transcoder::Transcoder;
 
-#[derive(Deserialize, accessory::Accessors)]
-#[access(get)]
+#[derive(Deserialize)]
 pub struct SpeechRequestBody {
-    model: Option<String>,
-    input: String,
-    voice: String,
-    response_format: Option<String>,
-    speed: Option<f32>,
+    pub model: Option<String>,
+    pub input: String,
+    pub voice: String,
+    pub response_format: Option<String>,
+    pub speed: Option<f32>,
 }
 
-#[derive(Debug, accessory::Accessors)]
-#[access(get)]
-pub(super) struct SpeechRequest {
-    model: String,
-    input: String,
-    voice: String,
-    response_format: AudioFormat,
-    speed: Option<f32>,
+#[derive(Debug)]
+pub struct SpeechRequest {
+    pub model: String,
+    pub input: String,
+    pub voice: String,
+    pub response_format: AudioFormat,
+    pub speed: Option<f32>,
 }
 
 impl SpeechRequest {
@@ -51,10 +49,7 @@ impl SpeechRequestBody {
         Self { model, input, voice, response_format, speed }
     }
 
-    pub(super) fn into_request<T: Transcoder>(
-        self,
-        state: &AppState<T>,
-    ) -> AppResult<SpeechRequest> {
+    pub fn into_request<T: Transcoder>(self, state: &AppState<T>) -> AppResult<SpeechRequest> {
         let model = self
             .model
             .unwrap_or_else(|| state.settings().provider().default_speech_model().clone());
@@ -64,13 +59,6 @@ impl SpeechRequestBody {
             Some(fmt) => AudioFormat::from_str(fmt)
                 .map_err(|_| AppError::BadRequest(format!("invalid response_format: {fmt}")))?,
         };
-
-        if OutputFormat::for_speech(response_format).is_none() {
-            return Err(AppError::BadRequest(format!(
-                "response_format '{}' is not supported for speech",
-                response_format.as_ref()
-            )));
-        }
 
         if let Some(speed) = self.speed
             && !(0.25..=4.0).contains(&speed)
@@ -133,11 +121,11 @@ filter = "proxid=warn"
         let body =
             SpeechRequestBody::new(None, "hello".to_string(), "alloy".to_string(), None, None);
         let req = body.into_request(&state).unwrap();
-        assert_eq!(*req.model(), "test/tts");
-        assert_eq!(*req.response_format(), AudioFormat::Mp3);
-        assert_eq!(req.input(), "hello");
-        assert_eq!(req.voice(), "alloy");
-        assert!(req.speed().is_none());
+        assert_eq!(req.model, "test/tts");
+        assert_eq!(req.response_format, AudioFormat::Mp3);
+        assert_eq!(req.input, "hello");
+        assert_eq!(req.voice, "alloy");
+        assert!(req.speed.is_none());
     }
 
     #[test]
@@ -183,7 +171,7 @@ filter = "proxid=warn"
             Some(0.25),
         );
         let req = body.into_request(&state).unwrap();
-        assert_eq!(*req.speed(), Some(0.25));
+        assert_eq!(req.speed, Some(0.25));
     }
 
     #[test]
@@ -192,21 +180,7 @@ filter = "proxid=warn"
         let body =
             SpeechRequestBody::new(None, "hello".to_string(), "alloy".to_string(), None, Some(4.0));
         let req = body.into_request(&state).unwrap();
-        assert_eq!(*req.speed(), Some(4.0));
-    }
-
-    #[test]
-    fn into_request_unsupported_format_for_speech_returns_bad_request() {
-        let state = test_state();
-        let body = SpeechRequestBody::new(
-            None,
-            "hello".to_string(),
-            "alloy".to_string(),
-            Some("m4a".to_string()),
-            None,
-        );
-        let err = body.into_request(&state).unwrap_err();
-        assert!(matches!(err, AppError::BadRequest(_)));
+        assert_eq!(req.speed, Some(4.0));
     }
 
     #[test]

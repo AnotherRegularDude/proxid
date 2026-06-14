@@ -18,12 +18,12 @@ pub async fn speech<T: Transcoder>(
     let req = body.into_request(&state)?;
 
     let svc = SpeechService::from_state(&state);
-    let (format, bytes) = svc.run(req).await?;
+    let audio = svc.run(req).await?;
 
     let resp = Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, format.mime())
-        .body(Body::from(bytes))
+        .header(header::CONTENT_TYPE, audio.format.mime())
+        .body(Body::from(audio.bytes.clone()))
         .map_err(|e| crate::core::error::AppError::Internal(format!("{e:#}")))?;
 
     Ok(resp)

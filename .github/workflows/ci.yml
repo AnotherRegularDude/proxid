@@ -10,6 +10,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   lint:
@@ -61,6 +63,7 @@ jobs:
   docker:
     needs: [lint, test]
     runs-on: ubuntu-latest
+    if: ${{ github.ref_type == 'tag' }}
     permissions:
       contents: read
       packages: write
@@ -100,5 +103,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          provenance: true
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

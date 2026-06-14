@@ -2,43 +2,11 @@ use super::dto;
 
 use anyhow::anyhow;
 use base64::prelude::*;
-use bytes::Bytes;
 use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
-use crate::core::audio::AudioFormat;
-use crate::core::usage::Usage;
-
-#[derive(accessory::Accessors)]
-#[access(get)]
-pub struct TranscriptionInput {
-    audio_bytes: Bytes,
-    format: AudioFormat,
-    model: String,
-    temperature: Option<f32>,
-}
-
-#[derive(accessory::Accessors)]
-#[access(get)]
-pub struct TranscriptionOutput {
-    text: String,
-    usage: Option<Usage>,
-}
-
-#[derive(accessory::Accessors)]
-#[access(get)]
-pub struct SpeechSynthRequest {
-    model: String,
-    input: String,
-    voice: String,
-    speed: Option<f32>,
-}
-
-#[derive(accessory::Accessors)]
-#[access(get)]
-pub struct SynthesisedSpeech {
-    bytes: Bytes,
-}
+use crate::core::audio::{AudioFormat, SourceAudio};
+use crate::core::audio_io::{SpeechPayload, TranscribePayload, TranscriptPayload};
 
 pub struct OpenRouterClient {
     http: reqwest::Client,
@@ -48,19 +16,6 @@ pub struct OpenRouterClient {
     default_speech_model: String,
     app_name: Option<String>,
     app_referer: Option<Url>,
-}
-
-impl std::fmt::Debug for OpenRouterClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenRouterClient")
-            .field("base_url", &self.base_url)
-            .field("api_key", &"***")
-            .field("default_transcription_model", &self.default_transcription_model)
-            .field("default_speech_model", &self.default_speech_model)
-            .field("app_name", &self.app_name)
-            .field("app_referer", &self.app_referer)
-            .finish()
-    }
 }
 
 #[derive(Default)]
@@ -97,19 +52,18 @@ impl OpenRouterClient {
         builder
     }
 
-    #[tracing::instrument(skip_all, fields(model = %input.model(), format = %input.format().as_ref(), size = input.audio_bytes().len()))]
+    #[tracing::instrument(skip_all, fields(format = %input.format.as_ref(), size = input.audio_bytes.len()))]
     pub async fn transcribe(
         &self,
-        input: TranscriptionInput,
-    ) -> Result<TranscriptionOutput, anyhow::Error> {
-        let model = input.model().clone();
-        let encoded = BASE64_STANDARD.encode(input.audio_bytes());
+        input: TranscribePayload,
+    ) -> Result<TranscriptPayload, anyhow::Error> {
+        let encoded = BASE64_STANDARD.encode(&input.audio_bytes);
         tracing::debug!(encoded_len = encoded.len(), "audio encoded to base64");
 
-        let request = dto::TranscriptionRequestDto::new(
-            model,
-            dto::InputAudioDto::new(encoded, input.format().into()),
-            *input.temperature(),
+        let request = dto::ProviderTranscribeRequest::new(
+            input.model.unwrap_or_else(|| self.default_transcription_model.clone()),
+            dto::ProviderInputAudio::new(encoded, input.format.into()),
+            input.temperature,
         );
 
         let mut url = self.base_url.clone();
@@ -130,32 +84,26 @@ impl OpenRouterClient {
         tracing::debug!(url = %url, status = %status, "received response from provider");
 
         if status.is_success() {
-            let dto: dto::TranscriptionResponseDto = response.json().await?;
+            let dto: dto::ProviderTranscribeResponse = response.json().await?;
             tracing::debug!(
-                text_len = dto.text().len(),
-                has_usage = dto.usage().is_some(),
+                text_len = dto.text.len(),
+                has_usage = dto.usage.is_some(),
                 "transcription successful"
             );
-            return Ok(TranscriptionOutput::new(
-                dto.text().clone(),
-                dto.usage().clone().map(Into::into),
-            ));
+            return Ok(dto.into());
         }
 
         Err(map_response_error(response).await)
     }
 
-    #[tracing::instrument(skip_all, fields(model = %request.model(), voice = %request.voice()))]
-    pub async fn synthesise(
-        &self,
-        request: SpeechSynthRequest,
-    ) -> Result<SynthesisedSpeech, anyhow::Error> {
-        let dto = dto::SpeechRequestDto::new(
-            request.model(),
-            request.input(),
-            request.voice(),
+    #[tracing::instrument(skip_all, fields(model = ?request.model, voice = %request.voice))]
+    pub async fn synthesise(&self, request: SpeechPayload) -> Result<SourceAudio, anyhow::Error> {
+        let dto = dto::ProviderSpeechRequest::new(
+            request.model.as_deref().unwrap_or(self.default_speech_model()),
+            &request.input,
+            &request.voice,
             "pcm",
-            *request.speed(),
+            request.speed,
         );
 
         let mut url = self.base_url.clone();
@@ -178,7 +126,7 @@ impl OpenRouterClient {
         if status.is_success() {
             let bytes = response.bytes().await?;
             tracing::debug!(len = bytes.len(), "speech synthesis successful");
-            return Ok(SynthesisedSpeech::new(bytes));
+            return Ok(SourceAudio::new(bytes, AudioFormat::Pcm));
         }
 
         Err(map_response_error(response).await)
@@ -247,32 +195,16 @@ impl OpenRouterClientBuilder {
     }
 }
 
-impl TranscriptionInput {
-    pub fn new(
-        audio_bytes: Bytes,
-        format: AudioFormat,
-        model: String,
-        temperature: Option<f32>,
-    ) -> Self {
-        Self { audio_bytes, format, model, temperature }
-    }
-}
-
-impl TranscriptionOutput {
-    pub fn new(text: String, usage: Option<Usage>) -> Self {
-        Self { text, usage }
-    }
-}
-
-impl SpeechSynthRequest {
-    pub fn new(model: String, input: String, voice: String, speed: Option<f32>) -> Self {
-        Self { model, input, voice, speed }
-    }
-}
-
-impl SynthesisedSpeech {
-    pub fn new(bytes: Bytes) -> Self {
-        Self { bytes }
+impl std::fmt::Debug for OpenRouterClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenRouterClient")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"***")
+            .field("default_transcription_model", &self.default_transcription_model)
+            .field("default_speech_model", &self.default_speech_model)
+            .field("app_name", &self.app_name)
+            .field("app_referer", &self.app_referer)
+            .finish()
     }
 }
 
@@ -286,8 +218,8 @@ async fn map_response_error(resp: reqwest::Response) -> anyhow::Error {
                 tracing::warn!(error = %e, "failed to read error response body");
                 String::new()
             });
-            let msg = serde_json::from_str::<dto::ErrorResponseDto>(&body)
-                .map(|e| e.error().message().clone())
+            let msg = serde_json::from_str::<dto::ErrorResponse>(&body)
+                .map(|e| e.error.message)
                 .unwrap_or(body);
             anyhow::anyhow!("upstream {status}: {msg}")
         }

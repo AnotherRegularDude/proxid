@@ -1,7 +1,7 @@
 use crate::config::AudioConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, accessory::Accessors)]
-#[access(get)]
+#[access(get, defaults(get(cp)))]
 pub struct TranscoderConfig {
     stt_sample_rate: u32,
     aac_bitrate_bps: u32,

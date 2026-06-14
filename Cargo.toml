@@ -34,8 +34,14 @@ http-body-util = "0.1"
 mockito = "1"
 tower = { version = "0.5", features = ["util"] }
 
+[profile.dev]
+opt-level = 0
+debug = true
+incremental = true
+
 [profile.release]
 opt-level = 3
+debug = false
 codegen-units = 1
 strip = true
 lto = true
